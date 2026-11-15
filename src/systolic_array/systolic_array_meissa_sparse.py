@@ -48,6 +48,7 @@ class SystolicArrayMEISSASparse24(SystolicArrayMEISSA):
         super().__init__(size, **kwargs)
         self._act4 = np.zeros((size, size, GROUP), dtype=np.float32)
         self._idx = np.zeros((size, size), dtype=np.int64)
+        self._pending_idx = None
 
     # -- weights -----------------------------------------------------------
 
@@ -103,6 +104,23 @@ class SystolicArrayMEISSASparse24(SystolicArrayMEISSA):
         self._idx = idx
         return surv, idx
 
+    def enqueue_packed_weights(self, weights, indices, dtype=None) -> bool:
+        """Shift one column of packed weights and its selectors together."""
+        idx = np.asarray(indices, dtype=np.int64)
+        if idx.shape != (self.size,) or np.any((idx < 0) | (idx >= GROUP)):
+            raise ValueError("expected one valid 2-bit index per weight")
+        if not self.enqueue_weights(weights, dtype=dtype):
+            return False
+        self._pending_idx = idx
+        return True
+
+    def _shift_weights(self) -> None:
+        if self.weight_en and self._pending_wgt is not None:
+            self._idx[:, 1:] = self._idx[:, :-1]
+            self._idx[:, 0] = 0 if self._pending_idx is None else self._pending_idx
+        self._pending_idx = None
+        super()._shift_weights()
+
     def metadata_bits(self) -> int:
         """Index bits a packed tile carries: 2 per cell."""
         return self.size * self.size * 2
@@ -116,10 +134,11 @@ class SystolicArrayMEISSASparse24(SystolicArrayMEISSA):
         if len(activations) != want:
             raise ValueError("sparse enqueue needs %d activations, got %d"
                              % (want, len(activations)))
-        if self._pending_act is not None:
+        if not self.can_accept():
             return False
         self._pending_act = np.asarray(
             self._cast(list(activations), dtype), dtype=np.float32)
+        self._drained = False
         return True
 
     def _shift_activations(self) -> None:

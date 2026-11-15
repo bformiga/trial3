@@ -130,11 +130,14 @@ class VLSFrontendBridge(Clocked):
     def start_cycle(self) -> None:
         self.activity_this_cycle = False
 
+    def _load_values(self, lanes):
+        return _decode_lanes_u16(lanes, self.vc.vector_len)
+
     def _on_frontend_read(self, load_id: int, addr: int, lanes, meta: Optional[Dict] = None) -> None:
         if load_id in self._completed_load_ids:
             return
         self._completed_load_ids.add(load_id)
-        data = _decode_lanes_u16(lanes, self.vc.vector_len)
+        data = self._load_values(lanes)
         self.bytes_load += len(data) * 2
         self.activity_this_cycle = True
         meta_dict = dict(meta or {})
@@ -602,6 +605,7 @@ def build_tpu_platform(
     vls_bridge_cls: Callable[..., Any] = VLSFrontendBridge,
     vls_bridge_kwargs: Optional[Dict[str, Any]] = None,
     systolic_array: str = "tpu",
+    compute_path_builder: Callable[..., Any] = build_tpu_compute_path,
 ) -> TPUPlatform:
     """Build the TPU platform.
 
@@ -652,7 +656,7 @@ def build_tpu_platform(
         bridge_kwargs=vls_bridge_kwargs,
     )
     vls_bridge = vls_bridges[0] if vls_bridges else None
-    sa, sysarr_bridge = build_tpu_compute_path(
+    sa, sysarr_bridge = compute_path_builder(
         vc=vc, size=int(size), dtype=str(dtype), mirror=mirror_obj,
         systolic_array=str(systolic_array))
 

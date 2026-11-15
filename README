@@ -239,3 +239,42 @@ the modular class hierarchy, naming conventions, and simulation lifecycle —
 are based on the gem5 design.
 
 gem5 is © The gem5 Project and distributed under the BSD 3-Clause License.
+Generated dense and 2:4 sparse workloads
+---------------------------------------
+
+From the repository root, with NumPy installed, run this for the included
+ResNet-50 conv1 matrices:
+
+    python tools/run_platform_benchmarks.py --workload resnet50_conv1 --json results/resnet50.json
+
+The default measures 8 activation rows and 16 output columns with the complete
+K dimension. Use --cols 64 to measure all 64 ResNet output columns, or --full
+for all rows and columns. The two Llama workloads are also accepted by
+--workload. Larger runs sum independent output tiles in software.
+
+The runner uses the same K-pruned weights in both modes. It moves inputs from
+DRAM through double-buffered scratchpad pads, the VLSUs and VRF, then issues
+GSAU requests to MEISSA. The vector datapath accumulates BF16 partial outputs.
+Timing stops at final accumulator writeback to the VRF per output tile. The
+harness models a tiled GEMM schedule through the Vector Core packet interface.
+It does not simulate a complete model, scalar instruction fetch, output stores
+or overlap between separate output tiles. Each array's accumulation is
+checked against a BF16-per-pass reference before reporting.
+
+* cycles is the simulated runtime summed across the selected output tiles.
+* weight_stall_cycles counts cycles after the first K pass where an activation
+  is ready for the current pass, but its weights are not yet in the array.
+  weight_stall_by_stage attributes each such cycle to DMA, VLSU writeback or
+  shifting the weights into the array. First-pass weight-only waits appear in
+  initial_weight_wait_cycles. both_operands_pending_cycles counts cycles
+  in which neither operand is ready.
+* weight_tile_loads includes the first load of each output tile. In sparse
+  mode, every weight column carries four BF16 lanes holding selector bytes
+  (four 2-bit selectors per lane). weight_payload_bytes includes this
+  transport overhead and excludes DRAM burst padding.
+* vlsu_active_count_cycles maps the number of simultaneously busy VLSUs to
+  cycle counts. vlsu_busy_cycles gives each unit's total. Busy includes
+  outstanding loads and queued requests, responses or writebacks.
+
+run_generated_benchmarks.py remains the direct-array comparison. Use the
+platform runner above for memory, weight stalls and VLSU activity.

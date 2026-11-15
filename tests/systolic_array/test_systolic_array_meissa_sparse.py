@@ -166,3 +166,27 @@ def test_utilisation_doubles_on_the_same_pruned_weights():
     u_dense = dense.active_pe_sum / (dense.compute_window_cycles * n * n)
 
     assert u_sparse > 1.5 * u_dense
+
+
+def test_shifted_weights_keep_their_selectors_across_input_bubbles():
+    sa = SystolicArrayMEISSASparse24(size=4, dtype="bf16")
+    weights = np.zeros((8, 4), dtype=np.float32)
+    for column in range(4):
+        weights[column, column] = column + 1
+        weights[7 - column, column] = 1
+    values, indices = sa.pack_2to4(weights)
+    sa.set_control(weight_en=True)
+    for cycle, column in enumerate(reversed(range(4))):
+        assert sa.enqueue_packed_weights(values[:, column].tolist(), indices[:, column])
+        sa.tick(cycle)
+
+    sa.set_control(weight_en=False)
+    inputs = np.arange(1, 9, dtype=np.float32)
+    cycle = 4
+    for _ in range(2):
+        assert sa.enqueue(inputs)
+        for _ in range(sa.drain_cycles() + 2):
+            sa.tick(cycle)
+            cycle += 1
+
+    np.testing.assert_array_equal(sa.get_buffer(), [inputs @ weights] * 2)
